@@ -1,5 +1,0 @@
-- name: Simple job
-  hosts: all
-  tasks:
-    - name: Output motd
-      command: cat /etc/os-release
