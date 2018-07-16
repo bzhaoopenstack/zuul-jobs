@@ -5,18 +5,17 @@
     - "{{ ansible_os_family }}.yaml"
     - "default.yaml"
 
-# RHEL and CentOS requires repositories provided by RDO in order to install
+# CentOS requires repositories provided by centos in order to install
 # openvswitch, set them up.
-- name: Set-up RDO repositories
+- name: Enable centos-release-openstack-queens
   become: yes
   package:
-    name: "{{ rdo_repository }}"
+    name: centos-release-openstack-queens
     state: installed
   when:
-    - rdo_repository is defined
     - ansible_os_family == "RedHat"
     - ansible_distribution != "Fedora"
-  register: rdo_repos
+  register: centos_ovs
 
 - name: Install openvswitch
   become: yes
@@ -31,13 +30,13 @@
     state: started
     enabled: yes
 
-# If we've installed RDO repositories for openvswitch earlier, remove them
-- name: Ensure RDO repositories are removed
+# If we've installed repositories for openvswitch earlier, remove them
+- name: Ensure centos-release-openstack-queens is removed
   become: yes
   package:
-    name: "rdo-release"
+    name: "centos-release-openstack-queens"
     state: absent
-  when: rdo_repos | changed
+  when: centos_ovs | changed
 
 - name: Authorize the multi-node-bridge network
   become: yes
@@ -52,3 +51,37 @@
   when:
     - bridge_configure_address | bool
     - bridge_authorize_internal_traffic | bool
+
+- when: bridge_mtu is not defined
+  block:
+    - name: Determine bridge mtu
+      shell: |
+        # Find all interfaces with a permanent mac address type.
+        # Permanent mac addrs imply "real" hardware and not interfaces we have
+        # created through this system. This makes our MTU determination mostly
+        # idempotent allowing us to create multiple overlays without
+        # perpetually smaller MTUs.
+        SMALLEST_MTU=""
+        for X in $(ls /sys/class/net) ; do
+            MAC_TYPE=$(cat "/sys/class/net/${X}/addr_assign_type")
+            if [ "$MAC_TYPE" -ne "0" ] ; then
+                # Type 0 is a permanent address implying a "real"
+                # interface. We ignore other interfaces as that is what we
+                # create here
+                continue
+            fi
+            MTU=$(cat "/sys/class/net/${X}/mtu")
+            if [ -z "$SMALLEST_MTU" ] || [ "$SMALLEST_MTU" -gt "$MTU" ] ; then
+                SMALLEST_MTU=$MTU
+            fi
+        done
+        # 50 byte overhead for vxlan
+        echo $(( SMALLEST_MTU - 50 ))
+      args:
+        executable: /bin/bash
+      environment:
+        PATH: '{{ ansible_env.PATH }}:/bin:/sbin:/usr/sbin'
+      register: mtu_output
+    - name: Set bridge_mtu
+      set_fact:
+        bridge_mtu: "{{ mtu_output.stdout }}"
