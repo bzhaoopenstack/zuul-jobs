@@ -16,10 +16,17 @@
     mode: 0755
   become: yes
 
+#- name: Make repositories writable so that people can hardlink
+#  file:
+#    path: "{{ ansible_user_dir }}/src"
+#    state: directory
+#    recurse: yes
+#    mode: ugo+rw
+#  become: yes
+
 - name: Make repositories writable so that people can hardlink
-  file:
-    path: "{{ ansible_user_dir }}/src"
-    state: directory
-    recurse: yes
-    mode: ugo+rw
+  shell: |
+    chmod ugo+rw "{{ ansible_user_dir }}/src" -R
+  args:
+    executable: /bin/bash
   become: yes
